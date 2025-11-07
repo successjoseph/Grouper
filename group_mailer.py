@@ -1,104 +1,78 @@
-import csv
+import json
 import smtplib
 import ssl
 from email.message import EmailMessage
+import time
+import os  # Added os
 
 # --- CONFIGURATION ---
+JSON_FILE_NAME = 'groups.json' # The file created by sorter.py
+PROGRESS_FILE = 'sent_log.json' # New file to track sent emails
 
-# 1. Update this with your CSV file's name
-CSV_FILE_NAME = 'students.csv' 
-
-# 2. Add your email credentials (SEE NOTES BELOW)
 SMTP_CONFIG = {
-    "server": "smtp.gmail.com",  # Example for Gmail
-    "port": 465,                 # For SSL
+    "server": "smtp.gmail.com",
+    "port": 465,
     "sender_email": "REDACTED",
-    "sender_password": "REDACTED"  # Use App Passwords for Gmail
+    "sender_password": "REDACTED" # Your App Password
 }
 
-# 3. Define the exact column names from your CSV
-COL_NAME = "Your Full Name (School Format)"
-COL_EMAIL = "Your School Mail (please check your capitalization)"
-COURSE_COLS = ["Course Code 1", "Course Code 2", "Course Code 3"]
-GROUP_COLS = ["Group Code 1", "Group Code 2", "Group Code 3"]
-
+DELAY_BETWEEN_EMAILS = 1 # in seconds
 # --- END CONFIGURATION ---
 
 
-def build_groups(csv_file):
-    """Reads the CSV and builds a dictionary of groups."""
-    groups = {}  # Key: (course, group_code), Value: [(name, email)]
-    
+def load_progress(progress_file):
+    """Loads the set of already sent email keys."""
+    if not os.path.exists(progress_file):
+        return set()
     try:
-        with open(csv_file, mode='r', encoding='utf-8') as file:
-            reader = csv.DictReader(file)
-            
-            for row in reader:
-                student_name = row.get(COL_NAME)
-                student_email = row.get(COL_EMAIL)
-                
-                if not student_name or not student_email:
-                    print(f"Skipping row with missing name or email: {row}")
-                    continue
-                
-                member_info = (student_name, student_email)
-                
-                # Check all 3 course/group pairs
-                for i in range(3):
-                    course = row.get(COURSE_COLS[i])
-                    group_code = row.get(GROUP_COLS[i])
-                    
-                    # Only create a group if both fields exist
-                    if course and group_code:
-                        group_key = (course.strip(), group_code.strip())
-                        
-                        if group_key not in groups:
-                            groups[group_key] = []
-                        
-                        # Add student to this group
-                        if member_info not in groups[group_key]:
-                            groups[group_key].append(member_info)
-                            
-    except FileNotFoundError:
-        print(f"ERROR: CSV file not found at '{csv_file}'")
-        return None
-    except Exception as e:
-        print(f"An error occurred reading the CSV: {e}")
-        return None
-        
-    return groups
+        with open(progress_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            return set(data)
+    except json.JSONDecodeError:
+        print(f"Warning: Could not read '{progress_file}'. Starting fresh.")
+        return set()
+
+def save_progress(progress_file, progress_set):
+    """Saves the set of sent email keys back to the file."""
+    try:
+        with open(progress_file, 'w', encoding='utf-8') as f:
+            # Convert set to list for JSON serialization
+            json.dump(list(progress_set), f)
+    except IOError as e:
+        print(f"  > CRITICAL WARNING: Could not save progress to log! Reason: {e}")
 
 
-def send_group_email(group_key, members, config):
-    """Sends a single email to all members of a group."""
+def send_personalized_email(recipient_info, group_info, all_members, config):
+    """
+    Sends one personalized email to one group member.
+    Returns True on success, False on failure.
+    """
     
-    course, group_code = group_key
+    recipient_name, recipient_email = recipient_info
+    course = group_info["course"]
+    group_code = group_info["group_code"]
+    
     subject = f"Your Group Members for: {course} - {group_code}"
     
-    # --- Create the email body ---
-    body = f"Hello,\n\nHere is the member list for your group in {course} ({group_code}):\n\n"
+    # --- Create the personalized email body ---
+    body = f"Hello {recipient_name},\n\n"
+    body += f"Here is the member list for your group in {course} ({group_code}):\n\n"
     
-    for name, email in members:
+    for name, email in all_members:
         body += f"* {name} ({email})\n"
         
     body += "\nBest,\nTechies Grouper Bot"
-
     body += "\n\n---\nThis is an automated message. Please do not reply."
-
-    body += "\n To join the Techies WhatsApp Community, click here: https://chat.whatsapp.com/JjHYvV3wPNFIf0ohGG3ZLZ"
+    body += "\nTo join the Techies WhatsApp Community, click here: https://chat.whatsapp.com/JjHYvV3wPNFIf0ohGG3ZLZ"
     # ---
     
-    # Get the list of all recipient emails
-    recipient_emails = [email for name, email in members]
-    
-    # Create the email message
     msg = EmailMessage()
     msg['Subject'] = subject
     msg['From'] = config["sender_email"]
-    msg['To'] = ", ".join(recipient_emails)  # Join all emails with a comma
+    msg['To'] = recipient_email
     msg.set_content(body)
     
-    print(f"Attempting to send email for group '{course} - {group_code}' to {len(recipient_emails)} members...")
+    print(f"  > Sending to: {recipient_name} ({recipient_email})...", end="")
     
     # Send the email
     try:
@@ -106,32 +80,72 @@ def send_group_email(group_key, members, config):
         with smtplib.SMTP_SSL(config["server"], config["port"], context=context) as server:
             server.login(config["sender_email"], config["sender_password"])
             server.send_message(msg)
-        print(f"  > SUCCESS: Email sent for {course} - {group_code}.")
+        print(" SUCCESS.")
+        return True # <-- Return True on success
+        
     except smtplib.SMTPException as e:
-        print(f"  > ERROR: Failed to send email for {course} - {group_code}. Reason: {e}")
+        print(f" FAILED. Reason: {e}")
+        return False # <-- Return False on failure
+    except Exception as e:
+        print(f" FAILED. Unexpected error: {e}")
+        return False # <-- Return False on failure
 
 
 def main():
-    # 1. Build the groups from the CSV
-    print(f"Reading CSV file: {CSV_FILE_NAME}...")
-    all_groups = build_groups(CSV_FILE_NAME)
-    
-    if all_groups is None:
-        print("Exiting due to CSV error.")
+    # 1. Load the groups from the JSON file
+    try:
+        with open(JSON_FILE_NAME, 'r', encoding='utf-8') as f:
+            all_groups_list = json.load(f)
+    except FileNotFoundError:
+        print(f"ERROR: '{JSON_FILE_NAME}' not found.")
+        print("Please run 'sorter.py' first to create the file.")
         return
-        
-    if not all_groups:
-        print("No groups were found or built. Check your CSV.")
+    except json.JSONDecodeError:
+        print(f"ERROR: Could not read '{JSON_FILE_NAME}'. File might be empty or corrupt.")
         return
 
-    print(f"Successfully built {len(all_groups)} unique groups.")
+    # 2. Load the progress log
+    progress_set = load_progress(PROGRESS_FILE)
+    print(f"Loaded {len(all_groups_list)} groups.")
+    print(f"Found {len(progress_set)} previously sent emails in log.")
+
+    total_emails_to_send = sum(len(group["members"]) for group in all_groups_list)
+    print(f"Total emails to process: {total_emails_to_send}\n")
+    print("--- Starting Mailer ---")
     
-    # 2. Loop and send emails
-    print("\nStarting to send emails...")
-    for group_key, members in all_groups.items():
-        send_group_email(group_key, members, SMTP_CONFIG)
+    for group in all_groups_list:
+        group_members = group["members"]
+        group_info = {"course": group["course"], "group_code": group["group_code"]}
         
-    print("\nAll tasks complete.")
+        print(f"\nProcessing Group: {group_info['course']} - {group_info['group_code']} ({len(group_members)} members)")
+        
+        for member_tuple in group_members:
+            recipient_name, recipient_email = member_tuple
+            
+            # Create a unique key for this specific email
+            log_key = f"{recipient_email}|{group_info['course']}|{group_info['group_code']}"
+            
+            # --- CHECK THE LOG ---
+            if log_key in progress_set:
+                print(f"  > SKIPPING: {recipient_name} (already sent for this group).")
+                continue # Skip to the next person
+            
+            # --- SEND THE EMAIL ---
+            success = send_personalized_email(
+                recipient_info=member_tuple,
+                group_info=group_info,
+                all_members=group_members,
+                config=SMTP_CONFIG
+            )
+            
+            # --- LOG ON SUCCESS ---
+            if success:
+                progress_set.add(log_key)
+                save_progress(PROGRESS_FILE, progress_set)
+            
+            time.sleep(DELAY_BETWEEN_EMAILS)
+            
+    print("\n--- All tasks complete ---")
 
 # Run the script
 if __name__ == "__main__":
