@@ -8,13 +8,16 @@ JSON_OUTPUT_FILE = 'groups.json'
 # Column names from your CSV
 COL_NAME = "Your Full Name (School Format)"
 COL_EMAIL = "Your School Mail (please check your capitalization)"
+# --- NEW ---
+COL_WHATSAPP = "Your WhatsApp Number e.g. +2348012345678 (Optional)" 
+# ---
 COURSE_COLS = ["Course Code 1", "Course Code 2", "Course Code 3"]
 GROUP_COLS = ["Group Code 1", "Group Code 2", "Group Code 3"]
 # --- END CONFIGURATION ---
 
 def build_groups(csv_file):
     """Reads the CSV and builds a dictionary of groups."""
-    groups = {}  # Key: (course, group_code), Value: [(name, email)]
+    groups = {}  # Key: (course, group_code), Value: [(name, email, phone)]
     
     try:
         with open(csv_file, mode='r', encoding='utf-8') as file:
@@ -28,22 +31,27 @@ def build_groups(csv_file):
                     print(f"Skipping row with missing name or email: {row}")
                     continue
                 
-                # Use a tuple for the member info
-                member_info = (student_name.strip(), student_email.strip())
+                # --- MODIFIED ---
+                # Get phone number, clean it, or set default
+                student_phone = row.get(COL_WHATSAPP, "").strip()
+                if not student_phone:
+                    student_phone = "Not Submitted"
+                
+                # Member info now includes the phone number
+                member_info = (student_name.strip(), student_email.strip(), student_phone)
+                # ---
                 
                 # Check all 3 course/group pairs
                 for i in range(3):
                     course = row.get(COURSE_COLS[i])
                     group_code = row.get(GROUP_COLS[i])
                     
-                    # Only create a group if both fields exist
                     if course and group_code:
                         group_key = (course.strip(), group_code.strip())
                         
                         if group_key not in groups:
                             groups[group_key] = []
                         
-                        # Add student to this group if not already present
                         if member_info not in groups[group_key]:
                             groups[group_key].append(member_info)
                             
@@ -74,7 +82,7 @@ def main():
         json_output_list.append({
             "course": course,
             "group_code": group_code,
-            "members": members  # 'members' is a list of (name, email) tuples
+            "members": members  # 'members' is now a list of (name, email, phone) tuples
         })
 
     # Save the clean list to a JSON file

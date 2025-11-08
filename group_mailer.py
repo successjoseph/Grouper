@@ -3,25 +3,24 @@ import smtplib
 import ssl
 from email.message import EmailMessage
 import time
-import os  # Added os
+import os
 
 # --- CONFIGURATION ---
-JSON_FILE_NAME = 'groups.json' # The file created by sorter.py
-PROGRESS_FILE = 'sent_log.json' # New file to track sent emails
+JSON_FILE_NAME = 'groups.json' 
+PROGRESS_FILE = 'sent_log.json' 
 
 SMTP_CONFIG = {
     "server": "smtp.gmail.com",
     "port": 465,
-    "sender_email": "REDACTED",
-    "sender_password": "REDACTED" # Your App Password
+    "sender_email": "greetings.techies@gmail.com",
+    "sender_password": "***ROTATED-REMOVED***" 
 }
 
-DELAY_BETWEEN_EMAILS = 1 # in seconds
+DELAY_BETWEEN_EMAILS = 10 
 # --- END CONFIGURATION ---
 
 
 def load_progress(progress_file):
-    """Loads the set of already sent email keys."""
     if not os.path.exists(progress_file):
         return set()
     try:
@@ -33,10 +32,8 @@ def load_progress(progress_file):
         return set()
 
 def save_progress(progress_file, progress_set):
-    """Saves the set of sent email keys back to the file."""
     try:
         with open(progress_file, 'w', encoding='utf-8') as f:
-            # Convert set to list for JSON serialization
             json.dump(list(progress_set), f)
     except IOError as e:
         print(f"  > CRITICAL WARNING: Could not save progress to log! Reason: {e}")
@@ -48,18 +45,25 @@ def send_personalized_email(recipient_info, group_info, all_members, config):
     Returns True on success, False on failure.
     """
     
-    recipient_name, recipient_email = recipient_info
+    # --- MODIFIED ---
+    # Unpack the recipient info (name, email, phone). We only need name and email.
+    recipient_name, recipient_email, _ = recipient_info 
+    # ---
+    
     course = group_info["course"]
     group_code = group_info["group_code"]
     
     subject = f"Your Group Members for: {course} - {group_code}"
     
-    # --- Create the personalized email body ---
+    # --- Create the personalized email body (MODIFIED) ---
     body = f"Hello {recipient_name},\n\n"
     body += f"Here is the member list for your group in {course} ({group_code}):\n\n"
     
-    for name, email in all_members:
-        body += f"* {name} ({email})\n"
+    # --- MODIFIED ---
+    # Now loops through (name, email, phone) tuples
+    for name, email, phone in all_members:
+        body += f"* {name} - {email} - (Phone: {phone})\n"
+    # ---
         
     body += "\nBest,\nTechies Grouper Bot"
     body += "\n\n---\nThis is an automated message. Please do not reply."
@@ -74,25 +78,23 @@ def send_personalized_email(recipient_info, group_info, all_members, config):
     
     print(f"  > Sending to: {recipient_name} ({recipient_email})...", end="")
     
-    # Send the email
     try:
         context = ssl.create_default_context()
         with smtplib.SMTP_SSL(config["server"], config["port"], context=context) as server:
             server.login(config["sender_email"], config["sender_password"])
             server.send_message(msg)
         print(" SUCCESS.")
-        return True # <-- Return True on success
+        return True 
         
     except smtplib.SMTPException as e:
         print(f" FAILED. Reason: {e}")
-        return False # <-- Return False on failure
+        return False 
     except Exception as e:
         print(f" FAILED. Unexpected error: {e}")
-        return False # <-- Return False on failure
+        return False 
 
 
 def main():
-    # 1. Load the groups from the JSON file
     try:
         with open(JSON_FILE_NAME, 'r', encoding='utf-8') as f:
             all_groups_list = json.load(f)
@@ -104,7 +106,6 @@ def main():
         print(f"ERROR: Could not read '{JSON_FILE_NAME}'. File might be empty or corrupt.")
         return
 
-    # 2. Load the progress log
     progress_set = load_progress(PROGRESS_FILE)
     print(f"Loaded {len(all_groups_list)} groups.")
     print(f"Found {len(progress_set)} previously sent emails in log.")
@@ -120,25 +121,24 @@ def main():
         print(f"\nProcessing Group: {group_info['course']} - {group_info['group_code']} ({len(group_members)} members)")
         
         for member_tuple in group_members:
-            recipient_name, recipient_email = member_tuple
+            # --- MODIFIED ---
+            # Unpack to get the email for the log_key
+            recipient_name, recipient_email, _ = member_tuple
+            # ---
             
-            # Create a unique key for this specific email
             log_key = f"{recipient_email}|{group_info['course']}|{group_info['group_code']}"
             
-            # --- CHECK THE LOG ---
             if log_key in progress_set:
                 print(f"  > SKIPPING: {recipient_name} (already sent for this group).")
-                continue # Skip to the next person
+                continue 
             
-            # --- SEND THE EMAIL ---
             success = send_personalized_email(
-                recipient_info=member_tuple,
+                recipient_info=member_tuple, # Pass the full (name, email, phone) tuple
                 group_info=group_info,
                 all_members=group_members,
                 config=SMTP_CONFIG
             )
             
-            # --- LOG ON SUCCESS ---
             if success:
                 progress_set.add(log_key)
                 save_progress(PROGRESS_FILE, progress_set)
@@ -147,6 +147,5 @@ def main():
             
     print("\n--- All tasks complete ---")
 
-# Run the script
 if __name__ == "__main__":
     main()
