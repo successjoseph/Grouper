@@ -4,16 +4,19 @@ import ssl
 from email.message import EmailMessage
 import time
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # --- CONFIGURATION ---
-JSON_FILE_NAME = 'groups.json' 
-PROGRESS_FILE = 'sent_log.json' 
+JSON_FILE_NAME = 'groups.json'
+PROGRESS_FILE = 'sent_log.json'
 
 SMTP_CONFIG = {
     "server": "smtp.gmail.com",
     "port": 465,
-    "sender_email": "greetings.techies@gmail.com",
-    "sender_password": "***ROTATED-REMOVED***" 
+    "sender_email": os.getenv("GROUPER_GMAIL_SENDER"),
+    "sender_password": os.getenv("GROUPER_GMAIL_APP_PASSWORD")  # Rotate this — was hardcoded here, now in .env
 }
 
 DELAY_BETWEEN_EMAILS = 10 
